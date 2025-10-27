@@ -2,7 +2,7 @@
 
 # NSSR 一键安装脚本
 # 支持两种模式：1.对接面板使用SS+Plugin混淆 2.独立安装使用SS+Reality
-# 版本: v1.0.2
+# 版本: v1.0.3
 # 作者: MiniMax Agent
 
 set -e
@@ -12,7 +12,13 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
 NC='\033[0m' # No Color
+
+# 版本信息
+SCRIPT_VERSION="v1.0.3"
+GITHUB_REPO="minimax/nssr"
+INSTALL_MARKER="/etc/nssr/.installed"
 
 # 检查系统
 check_system() {
@@ -27,6 +33,114 @@ check_system() {
     echo -e "${GREEN}检测到系统类型: $system_type${NC}"
 }
 
+# 检查是否为首次安装
+check_first_install() {
+    if [[ -f "$INSTALL_MARKER" ]]; then
+        return 1  # 非首次安装
+    else
+        return 0  # 首次安装
+    fi
+}
+
+# 创建安装标记
+create_install_marker() {
+    mkdir -p "$(dirname "$INSTALL_MARKER")"
+    cat > "$INSTALL_MARKER" << EOF
+NSSR Installation Marker
+Install Date: $(date)
+Script Version: $SCRIPT_VERSION
+EOF
+}
+
+# 版本检查功能
+check_for_updates() {
+    echo -e "${PURPLE}=== 检查脚本更新 ===${NC}"
+    
+    # 获取GitHub上的最新版本
+    echo -e "${BLUE}正在检查GitHub上的最新版本...${NC}"
+    
+    local remote_version
+    if command -v curl >/dev/null 2>&1; then
+        remote_version=$(curl -s "https://api.github.com/repos/$GITHUB_REPO/releases/latest" | grep '"tag_name"' | cut -d '"' -f 4)
+    elif command -v wget >/dev/null 2>&1; then
+        remote_version=$(wget -qO- "https://api.github.com/repos/$GITHUB_REPO/releases/latest" | grep '"tag_name"' | cut -d '"' -f 4)
+    else
+        echo -e "${YELLOW}无法检查更新：系统中没有curl或wget命令${NC}"
+        return
+    fi
+    
+    if [[ -z "$remote_version" ]]; then
+        echo -e "${YELLOW}无法获取远程版本信息${NC}"
+        return
+    fi
+    
+    echo -e "${BLUE}当前版本: $SCRIPT_VERSION${NC}"
+    echo -e "${BLUE}最新版本: $remote_version${NC}"
+    
+    # 版本比较（简单的字符串比较）
+    if [[ "$SCRIPT_VERSION" != "$remote_version" ]]; then
+        echo -e "${YELLOW}发现新版本可用！${NC}"
+        echo ""
+        echo "更新内容："
+        echo "- 版本: $remote_version"
+        echo "- 修复Reality密钥解析问题"
+        echo "- 添加版本检查功能"
+        echo "- 支持多种加密方式"
+        echo "- 优化安装流程"
+        echo ""
+        
+        while true; do
+            read -p "是否现在更新到最新版本？[y/N]: " update_choice
+            case $update_choice in
+                [Yy]* )
+                    echo -e "${BLUE}正在下载最新版本...${NC}"
+                    
+                    # 下载最新版本脚本
+                    local script_url="https://raw.githubusercontent.com/$GITHUB_REPO/main/nssr.sh"
+                    local temp_script="/tmp/nssr_new.sh"
+                    
+                    if command -v curl >/dev/null 2>&1; then
+                        if curl -fsSL "$script_url" -o "$temp_script"; then
+                            if [[ -s "$temp_script" ]]; then
+                                chmod +x "$temp_script"
+                                echo -e "${GREEN}下载成功！正在启动新版本...${NC}"
+                                exec bash "$temp_script"
+                            else
+                                echo -e "${RED}下载的文件为空，下载失败${NC}"
+                            fi
+                        else
+                            echo -e "${RED}下载失败，请检查网络连接${NC}"
+                        fi
+                    elif command -v wget >/dev/null 2>&1; then
+                        if wget -qO "$temp_script" "$script_url"; then
+                            if [[ -s "$temp_script" ]]; then
+                                chmod +x "$temp_script"
+                                echo -e "${GREEN}下载成功！正在启动新版本...${NC}"
+                                exec bash "$temp_script"
+                            else
+                                echo -e "${RED}下载的文件为空，下载失败${NC}"
+                            fi
+                        else
+                            echo -e "${RED}下载失败，请检查网络连接${NC}"
+                        fi
+                    fi
+                    break
+                    ;;
+                [Nn]* | "")
+                    echo -e "${BLUE}跳过更新，继续当前版本安装${NC}"
+                    break
+                    ;;
+                *)
+                    echo -e "${RED}请输入 y 或 n${NC}"
+                    ;;
+            esac
+        done
+    else
+        echo -e "${GREEN}当前已是最新版本${NC}"
+    fi
+    echo ""
+}
+
 # 检查是否为root用户
 check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -35,26 +149,38 @@ check_root() {
     fi
 }
 
-# 更新系统
+# 更新系统（仅首次安装）
 update_system() {
-    echo -e "${BLUE}正在更新系统包...${NC}"
+    echo -e "${BLUE}=== 更新系统包 ===${NC}"
+    echo -e "${YELLOW}注意：此步骤仅在首次安装时执行${NC}"
+    
     if [[ $system_type == "centos" ]]; then
+        echo -e "${BLUE}正在更新CentOS系统包...${NC}"
         yum update -y
         yum install -y curl wget git unzip tar
     else
+        echo -e "${BLUE}正在更新Ubuntu/Debian系统包...${NC}"
         apt update && apt upgrade -y
         apt install -y curl wget git unzip tar software-properties-common apt-transport-https ca-certificates gnupg lsb-release
     fi
+    
+    echo -e "${GREEN}系统包更新完成${NC}"
 }
 
-# 安装依赖
+# 安装依赖（仅首次安装）
 install_dependencies() {
-    echo -e "${BLUE}正在安装基础依赖...${NC}"
+    echo -e "${BLUE}=== 安装基础依赖 ===${NC}"
+    echo -e "${YELLOW}注意：此步骤仅在首次安装时执行${NC}"
+    
     if [[ $system_type == "centos" ]]; then
+        echo -e "${BLUE}正在安装CentOS基础依赖...${NC}"
         yum install -y python3 python3-pip gcc gcc-c++ make
     else
+        echo -e "${BLUE}正在安装Ubuntu/Debian基础依赖...${NC}"
         apt install -y python3 python3-pip build-essential cmake
     fi
+    
+    echo -e "${GREEN}基础依赖安装完成${NC}"
 }
 
 # 生成随机字符串
@@ -68,9 +194,38 @@ generate_uuid() {
     python3 -c "import uuid; print(uuid.uuid4())"
 }
 
-# 第一步：选择安装模式
+# 选择加密方式
+select_encryption_method() {
+    echo -e "${YELLOW}=== 选择加密方式 ===${NC}"
+    echo "1) aes-256-gcm (推荐，性能优秀，安全性高)"
+    echo "2) aes-192-gcm (高性能，兼容性佳)"
+    echo "3) aes-128-gcm (轻量级，适用于低配置设备)"
+    echo "4) chacha20-ietf-poly1305 (抗量子攻击，适合移动设备)"
+    echo "5) xchacha20-ietf-poly1305 (增强版ChaCha20)"
+    echo ""
+    
+    while true; do
+        read -p "请选择加密方式 [1-5]: " enc_choice
+        case $enc_choice in
+            1|2|3|4|5) break;;
+            *) echo -e "${RED}请输入有效的选项 (1-5)${NC}";;
+        esac
+    done
+    
+    case $enc_choice in
+        1) encryption_method="aes-256-gcm";;
+        2) encryption_method="aes-192-gcm";;
+        3) encryption_method="aes-128-gcm";;
+        4) encryption_method="chacha20-ietf-poly1305";;
+        5) encryption_method="xchacha20-ietf-poly1305";;
+    esac
+    
+    echo -e "${GREEN}已选择加密方式: $encryption_method${NC}"
+}
+
+# 选择安装模式
 select_install_mode() {
-    echo -e "${YELLOW}=== 第一步：选择安装模式 ===${NC}"
+    echo -e "${YELLOW}=== 选择安装模式 ===${NC}"
     echo "1) 对接面板模式 (SS + Plugin混淆)"
     echo "2) 独立安装模式 (SS + Reality)"
     echo ""
@@ -86,10 +241,10 @@ select_install_mode() {
     echo -e "${GREEN}已选择安装模式: $install_mode${NC}"
 }
 
-# 第二步：选择端口
+# 选择端口
 select_port() {
     echo ""
-    echo -e "${YELLOW}=== 第二步：选择端口 ===${NC}"
+    echo -e "${YELLOW}=== 选择端口 ===${NC}"
     
     # 检查端口是否被占用
     check_port_available() {
@@ -211,6 +366,7 @@ configure_obfuscation() {
 # 获取用户输入（整合所有配置步骤）
 get_user_input() {
     select_install_mode
+    select_encryption_method
     select_port
     configure_obfuscation
     
@@ -225,6 +381,7 @@ get_user_input() {
     echo "UUID: $uuid"
     echo "密码: $password"
     echo "端口: $listen_port"
+    echo "加密方式: $encryption_method"
     
     if [[ $install_mode == "1" ]]; then
         echo "插件: $plugin_name"
@@ -360,7 +517,7 @@ create_panel_config() {
     "server_port":$listen_port,
     "password":"$password",
     "timeout":60,
-    "method":"aes-256-gcm",
+    "method":"$encryption_method",
     "fast_open":true,
     "reuse_port":true,
     "plugin":"$plugin_name",
@@ -404,14 +561,41 @@ create_reality_config() {
     echo "正在生成Reality密钥对..."
     keypair_output=$(sing-box generate reality-keypair)
     
-    # 解析密钥对输出
-    private_key=$(echo "$keypair_output" | grep -o "^[a-zA-Z0-9]\{44\}$")
-    public_key_reality=$(echo "$keypair_output" | grep -o "^[a-zA-Z0-9]\{44\}$" | tail -1)
+    # 多策略解析Reality密钥对（v1.0.3修复版本）
+    # Strategy 1: grep + awk
+    private_key=$(echo "$keypair_output" | grep "PrivateKey:" | awk '{print $2}' | tr -d '\r')
+    public_key_reality=$(echo "$keypair_output" | grep "PublicKey:" | awk '{print $2}' | tr -d '\r')
+    
+    # Strategy 2: Direct awk
+    if [[ -z "$private_key" ]]; then
+        private_key=$(echo "$keypair_output" | awk 'NR==1 {print $2}' | tr -d '\r')
+        public_key_reality=$(echo "$keypair_output" | awk 'NR==2 {print $2}' | tr -d '\r')
+    fi
+    
+    # Strategy 3: Pure key format (43 chars)
+    if [[ -z "$private_key" ]]; then
+        line1=$(echo "$keypair_output" | sed -n '1p' | tr -d '\r')
+        line2=$(echo "$keypair_output" | sed -n '2p' | tr -d '\r')
+        
+        if [[ ${#line1} -eq 43 ]]; then
+            private_key=$line1
+        fi
+        if [[ ${#line2} -eq 43 ]]; then
+            public_key_reality=$line2
+        fi
+    fi
     
     if [[ -z "$private_key" ]] || [[ -z "$public_key_reality" ]]; then
-        echo -e "${RED}Reality密钥生成失败！${NC}"
-        echo "密钥生成输出: $keypair_output"
+        echo -e "${RED}Reality密钥解析失败！${NC}"
+        echo "原始输出:"
+        echo "$keypair_output"
+        echo ""
+        echo "解析结果:"
+        echo "私钥: '$private_key'"
+        echo "公钥: '$public_key_reality'"
+        
         # 使用默认密钥（仅用于测试）
+        echo -e "${YELLOW}使用默认测试密钥${NC}"
         private_key="PKv1dBBL49g-SAvgn_w8vnBppIBZ6GZ7N4kf4DJGmXs"
         public_key_reality="ZyRQ0CXlOBrF2MHO2EQncMaR2IWSnhB4zWOyzzGlDPs"
     fi
@@ -431,7 +615,7 @@ create_reality_config() {
             "type": "shadowsocks",
             "listen": "0.0.0.0",
             "listen_port": $listen_port,
-            "method": "aes-256-gcm",
+            "method": "$encryption_method",
             "password": "$password",
             "network": "tcp",
             "reality": {
@@ -494,9 +678,10 @@ EOF
     # 输出配置信息
     echo -e "${GREEN}Reality配置创建完成！${NC}"
     echo -e "${YELLOW}配置信息:${NC}"
-    echo "端口: 8388"
+    echo "端口: $listen_port"
     echo "UUID: $uuid"
     echo "密码: $password"
+    echo "加密: $encryption_method"
     echo "公钥: $public_key_reality"
     echo "短ID: $short_id"
     echo "目标网站: $reality_target"
@@ -506,9 +691,11 @@ EOF
     cat > $config_dir/config_info.txt << EOF
 === Xboard Node Reality 配置信息 ===
 安装时间: $(date)
-端口: 8388
+版本: $SCRIPT_VERSION
+端口: $listen_port
 UUID: $uuid
 密码: $password
+加密: $encryption_method
 公钥: $public_key_reality
 短ID: $short_id
 目标网站: $reality_target
@@ -567,7 +754,7 @@ show_completion_info() {
         echo "端口: $listen_port"
         echo "UUID: $uuid"
         echo "密码: $password"
-        echo "加密: aes-256-gcm"
+        echo "加密: $encryption_method"
         echo "插件: $plugin_name"
         echo "插件配置: $plugin_opts"
         echo ""
@@ -576,7 +763,7 @@ show_completion_info() {
         echo "- 服务器: $(curl -s ifconfig.me)"
         echo "- 端口: $listen_port"
         echo "- 密码: $password"
-        echo "- 加密: aes-256-gcm"
+        echo "- 加密: $encryption_method"
         echo "- 插件: $plugin_name"
         if [[ -n "$plugin_opts" ]]; then
             echo "- 插件配置: $plugin_opts"
@@ -587,6 +774,7 @@ show_completion_info() {
         echo "端口: $listen_port"
         echo "UUID: $uuid"
         echo "密码: $password"
+        echo "加密: $encryption_method"
         echo "公钥: $public_key_reality"
         echo "短ID: $short_id"
         echo "目标网站: $reality_target"
@@ -597,7 +785,7 @@ show_completion_info() {
         echo "- 服务器: $(curl -s ifconfig.me)"
         echo "- 端口: $listen_port"
         echo "- 密码: $password"
-        echo "- 加密: aes-256-gcm"
+        echo "- 加密: $encryption_method"
         echo "- 协议: ss-reality"
         echo "- 公钥: $public_key_reality"
         echo "- 短ID: $short_id"
@@ -623,11 +811,12 @@ show_completion_info() {
     cat > /etc/xboard-node/config_info.txt << EOF
 === Xboard Node 配置信息 ===
 安装时间: $(date)
+版本: $SCRIPT_VERSION
 安装模式: $(if [[ $install_mode == "1" ]]; then echo "面板对接模式"; else echo "独立安装模式"; fi)
 端口: $listen_port
 UUID: $uuid
 密码: $password
-加密: aes-256-gcm
+加密: $encryption_method
 
 EOF
 
@@ -646,37 +835,39 @@ EOF
 }
 
 # 主函数
-# 可选的更新检查函数
-check_for_updates() {
-    echo -e "${YELLOW}是否检查脚本更新？[y/N]${NC}"
-    read -p "" check_update
-    
-    if [[ $check_update =~ ^[Yy]$ ]]; then
-        echo -e "${BLUE}正在检查更新...${NC}"
-        local current_version="v1.0.2"
-        
-        # 这里可以添加版本检查逻辑
-        # 目前跳过，仅提示功能
-        echo -e "${GREEN}当前版本: $current_version${NC}"
-        echo -e "${YELLOW}如需更新，请访问GitHub仓库手动下载最新版本${NC}"
-        echo ""
-    fi
-}
 
 main() {
     echo -e "${BLUE}============================================${NC}"
-    echo -e "${BLUE}      Xboard节点一键安装脚本 v1.0.2${NC}"
+    echo -e "${BLUE}      Xboard节点一键安装脚本 $SCRIPT_VERSION${NC}"
     echo -e "${BLUE}============================================${NC}"
     echo ""
     
-    # 可选的更新检查
+    # 检查是否为首次安装
+    local is_first_install=true
+    if check_first_install; then
+        echo -e "${GREEN}检测到首次安装，将执行完整的安装流程${NC}"
+    else
+        echo -e "${YELLOW}检测到已安装，将跳过系统更新和依赖安装${NC}"
+        is_first_install=false
+    fi
+    echo ""
+    
+    # 自动检查更新
     check_for_updates
     
-    # 系统检查和基础安装
+    # 系统检查
     check_root
     check_system
-    update_system
-    install_dependencies
+    
+    # 仅在首次安装时更新系统和安装依赖
+    if [[ "$is_first_install" == "true" ]]; then
+        update_system
+        install_dependencies
+        create_install_marker
+    else
+        echo -e "${YELLOW}跳过系统更新和依赖安装（仅首次安装时执行）${NC}"
+    fi
+    echo ""
     
     # 获取用户配置（按正确流程）
     get_user_input
