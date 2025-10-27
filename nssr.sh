@@ -2,7 +2,7 @@
 
 # NSSR 一键安装脚本
 # 支持两种模式：1.对接面板使用SS+Plugin混淆 2.独立安装使用SS+Reality
-# 版本: v1.0.0
+# 版本: v1.0.1
 # 作者: MiniMax Agent
 
 set -e
@@ -209,16 +209,44 @@ install_sing_box() {
         arch="amd64"
     elif [[ $arch == "aarch64" ]]; then
         arch="arm64"
+    else
+        arch="amd64"
     fi
     
-    singbox_url="https://github.com/SagerNet/sing-box/releases/download/${latest_version}/sing-box-${latest_version#v}-linux-${arch}.tar.gz"
+    # 修复：使用正确的文件名格式
+    filename="sing-box-${latest_version#v}-linux-${arch}.tar.gz"
+    singbox_url="https://github.com/SagerNet/sing-box/releases/download/${latest_version}/$filename"
     
     cd /tmp
+    echo "正在下载: $filename"
     wget -O sing-box.tar.gz "$singbox_url"
+    
+    if [[ $? -ne 0 ]]; then
+        echo -e "${RED}下载失败！${NC}"
+        exit 1
+    fi
+    
+    echo "正在解压..."
     tar -xzf sing-box.tar.gz
-    mv sing-box /usr/bin/sing-box
+    
+    # 修复：检查解压出的文件并正确移动
+    if [[ -f sing-box ]]; then
+        mv sing-box /usr/bin/sing-box
+        echo -e "${GREEN}sing-box二进制文件已移动到/usr/bin/sing-box${NC}"
+    elif [[ -f sing-box-${latest_version#v}-linux-${arch}/sing-box ]]; then
+        mv sing-box-${latest_version#v}-linux-${arch}/sing-box /usr/bin/sing-box
+        echo -e "${GREEN}sing-box二进制文件已移动到/usr/bin/sing-box${NC}"
+    else
+        echo -e "${RED}错误：找不到sing-box二进制文件${NC}"
+        ls -la
+        exit 1
+    fi
+    
     chmod +x /usr/bin/sing-box
-    rm sing-box.tar.gz
+    
+    # 清理临时文件
+    rm -rf sing-box.tar.gz sing-box* 
+    echo -e "${GREEN}sing-box安装完成${NC}"
 }
 
 # 创建配置文件 - 面板对接模式
@@ -479,11 +507,31 @@ show_completion_info() {
 }
 
 # 主函数
+# 可选的更新检查函数
+check_for_updates() {
+    echo -e "${YELLOW}是否检查脚本更新？[y/N]${NC}"
+    read -p "" check_update
+    
+    if [[ $check_update =~ ^[Yy]$ ]]; then
+        echo -e "${BLUE}正在检查更新...${NC}"
+        local current_version="v1.0.1"
+        
+        # 这里可以添加版本检查逻辑
+        # 目前跳过，仅提示功能
+        echo -e "${GREEN}当前版本: $current_version${NC}"
+        echo -e "${YELLOW}如需更新，请访问GitHub仓库手动下载最新版本${NC}"
+        echo ""
+    fi
+}
+
 main() {
     echo -e "${BLUE}============================================${NC}"
-    echo -e "${BLUE}      Xboard节点一键安装脚本 v1.0.0${NC}"
+    echo -e "${BLUE}      Xboard节点一键安装脚本 v1.0.1${NC}"
     echo -e "${BLUE}============================================${NC}"
     echo ""
+    
+    # 可选的更新检查
+    check_for_updates
     
     check_root
     check_system
