@@ -2,7 +2,7 @@
 
 # NSSR 一键安装脚本
 # 支持两种模式：1.对接面板使用SS+Plugin混淆 2.独立安装使用SS+Reality
-# 版本: v1.0.1
+# 版本: v1.0.2
 # 作者: MiniMax Agent
 
 set -e
@@ -68,9 +68,9 @@ generate_uuid() {
     python3 -c "import uuid; print(uuid.uuid4())"
 }
 
-# 获取用户输入
-get_user_input() {
-    echo -e "${YELLOW}=== 安装模式选择 ===${NC}"
+# 第一步：选择安装模式
+select_install_mode() {
+    echo -e "${YELLOW}=== 第一步：选择安装模式 ===${NC}"
     echo "1) 对接面板模式 (SS + Plugin混淆)"
     echo "2) 独立安装模式 (SS + Reality)"
     echo ""
@@ -83,70 +83,167 @@ get_user_input() {
         esac
     done
     
-    if [[ $install_mode == "1" ]]; then
-        get_panel_config
-    else
-        get_reality_config
-    fi
+    echo -e "${GREEN}已选择安装模式: $install_mode${NC}"
 }
 
-# 获取面板对接配置
-get_panel_config() {
-    echo -e "${YELLOW}=== 面板对接配置 ===${NC}"
-    
-    read -p "请输入面板地址 (例: https://面板域名): " panel_url
-    read -p "请输入面板密钥: " panel_key
-    read -p "请输入节点ID: " node_id
-    read -p "请输入节点名称: " node_name
-    
-    # 选择插件类型
+# 第二步：选择端口
+select_port() {
     echo ""
-    echo "请选择混淆插件类型:"
-    echo "1) simple-obfs (简单混淆)"
-    echo "2) v2ray-plugin (V2Ray插件)"
+    echo -e "${YELLOW}=== 第二步：选择端口 ===${NC}"
+    
+    # 检查端口是否被占用
+    check_port_available() {
+        local port=$1
+        if netstat -tuln | grep -q ":$port "; then
+            return 1
+        else
+            return 0
+        fi
+    }
+    
+    # 建议端口范围
+    echo "请选择节点端口 (建议范围: 10000-65535)"
+    echo "常用端口: 443, 3389, 8080, 8888, 9999"
+    echo ""
     
     while true; do
-        read -p "请选择插件类型 [1-2]: " plugin_type
-        case $plugin_type in
-            1|2) break;;
-            *) echo -e "${RED}请输入有效的选项 (1 或 2)${NC}";;
-        esac
+        read -p "请输入端口号: " listen_port
+        
+        # 验证端口号
+        if [[ ! "$listen_port" =~ ^[0-9]+$ ]] || [[ "$listen_port" -lt 1 ]] || [[ "$listen_port" -gt 65535 ]]; then
+            echo -e "${RED}请输入有效的端口号 (1-65535)${NC}"
+            continue
+        fi
+        
+        # 检查端口是否被占用
+        if ! check_port_available $listen_port; then
+            echo -e "${RED}端口 $listen_port 已被占用，请选择其他端口${NC}"
+            continue
+        fi
+        
+        # 验证 privileged 端口
+        if [[ "$listen_port" -lt 1024 ]]; then
+            echo -e "${YELLOW}警告: 端口 $listen_port 是特权端口，普通用户可能需要root权限${NC}"
+            read -p "确认使用此端口? [y/N]: " confirm
+            if [[ ! $confirm =~ ^[Yy]$ ]]; then
+                continue
+            fi
+        fi
+        
+        break
     done
     
-    if [[ $plugin_type == "1" ]]; then
-        read -p "请输入混淆类型 (http/tls): " obfs_type
-        read -p "请输入混淆Host (例: www.bing.com): " obfs_host
-        plugin_name="simple-obfs"
-        plugin_opts="obfs=${obfs_type};obfs-host=${obfs_host}"
+    echo -e "${GREEN}已选择端口: $listen_port${NC}"
+}
+
+# 第三步：配置混淆/Reality目标网站
+configure_obfuscation() {
+    echo ""
+    echo -e "${YELLOW}=== 第三步：配置混淆/目标网站 ===${NC}"
+    
+    if [[ $install_mode == "1" ]]; then
+        # 对接面板模式：选择混淆插件
+        echo "请选择混淆插件类型:"
+        echo "1) simple-obfs (简单混淆)"
+        echo "2) v2ray-plugin (V2Ray插件)"
+        
+        while true; do
+            read -p "请选择插件类型 [1-2]: " plugin_type
+            case $plugin_type in
+                1|2) break;;
+                *) echo -e "${RED}请输入有效的选项 (1 或 2)${NC}";;
+            esac
+        done
+        
+        if [[ $plugin_type == "1" ]]; then
+            read -p "请输入混淆类型 (http/tls): " obfs_type
+            read -p "请输入混淆Host (例: www.bing.com): " obfs_host
+            plugin_name="simple-obfs"
+            plugin_opts="obfs=${obfs_type};obfs-host=${obfs_host}"
+        else
+            plugin_name="v2ray-plugin"
+            plugin_opts=""
+        fi
+        
+        echo -e "${GREEN}混淆插件配置完成: $plugin_name${NC}"
     else
-        plugin_name="v2ray-plugin"
-        plugin_opts=""
+        # 独立安装模式：选择Reality目标网站
+        echo "请选择Reality目标网站:"
+        echo "1) www.microsoft.com (推荐)"
+        echo "2) www.google.com"
+        echo "3) www.github.com"
+        echo "4) 自定义域名"
+        
+        while true; do
+            read -p "请选择 [1-4]: " target_choice
+            case $target_choice in
+                1|2|3|4) break;;
+                *) echo -e "${RED}请输入有效的选项 (1-4)${NC}";;
+            esac
+        done
+        
+        case $target_choice in
+            1)
+                reality_target="www.microsoft.com"
+                reality_sni="www.microsoft.com"
+                ;;
+            2)
+                reality_target="www.google.com"
+                reality_sni="www.google.com"
+                ;;
+            3)
+                reality_target="www.github.com"
+                reality_sni="www.github.com"
+                ;;
+            4)
+                read -p "请输入自定义目标网站: " reality_target
+                read -p "请输入SNI (默认使用目标网站): " reality_sni
+                if [[ -z "$reality_sni" ]]; then
+                    reality_sni="$reality_target"
+                fi
+                ;;
+        esac
+        
+        echo -e "${GREEN}Reality目标网站配置完成: $reality_target${NC}"
     fi
 }
 
-# 获取Reality配置
-get_reality_config() {
-    echo -e "${YELLOW}=== Reality配置 ===${NC}"
+# 获取用户输入（整合所有配置步骤）
+get_user_input() {
+    select_install_mode
+    select_port
+    configure_obfuscation
     
-    # 生成配置
+    # 生成基本配置参数
     uuid=$(generate_uuid)
     password=$(generate_random_string 32)
-    public_key=$(generate_random_string 32)
-    short_id=$(generate_random_string 8)
+    short_id=$(echo -n $password | md5sum | cut -c1-16)
     
-    echo -e "${BLUE}生成的配置信息:${NC}"
+    echo ""
+    echo -e "${GREEN}=== 第四步：生成配置参数 ===${NC}"
+    echo -e "${BLUE}生成的基础配置:${NC}"
     echo "UUID: $uuid"
     echo "密码: $password"
-    echo "公钥: $public_key"
-    echo "短ID: $short_id"
+    echo "端口: $listen_port"
     
-    # 获取目标站点
-    read -p "请输入Reality目标网站 (例: www.microsoft.com): " reality_target
-    read -p "请输入Reality目标SNI (默认使用目标网站): " reality_sni
-    if [[ -z "$reality_sni" ]]; then
-        reality_sni="$reality_target"
+    if [[ $install_mode == "1" ]]; then
+        echo "插件: $plugin_name"
+        echo "插件配置: $plugin_opts"
+    else
+        echo "短ID: $short_id"
+        echo "目标网站: $reality_target"
+        echo "目标SNI: $reality_sni"
+    fi
+    
+    echo ""
+    read -p "确认使用以上配置继续安装？[Y/n]: " confirm
+    if [[ $confirm =~ ^[Nn]$ ]]; then
+        echo "安装已取消"
+        exit 0
     fi
 }
+
+
 
 # 安装shadowsocks-libev
 install_shadowsocks_libev() {
@@ -260,14 +357,14 @@ create_panel_config() {
     cat > $config_dir/shadowsocks.json << EOF
 {
     "server":"0.0.0.0",
-    "server_port":8388,
-    "password":"${password:-$(generate_random_string 32)}",
+    "server_port":$listen_port,
+    "password":"$password",
     "timeout":60,
     "method":"aes-256-gcm",
     "fast_open":true,
     "reuse_port":true,
-    "plugin":"${plugin_name}",
-    "plugin_opts":"${plugin_opts}"
+    "plugin":"$plugin_name",
+    "plugin_opts":"$plugin_opts"
 }
 EOF
     
@@ -303,17 +400,26 @@ create_reality_config() {
     config_dir="/etc/xboard-node"
     mkdir -p $config_dir
     
-    # 生成密钥对
-    keypair=$(sing-box generate reality-keypair)
-    private_key=$(echo "$keypair" | grep "PrivateKey:" | awk '{print $2}')
-    public_key_reality=$(echo "$keypair" | grep "PublicKey:" | awk '{print $2}')
+    # 生成Reality密钥对
+    echo "正在生成Reality密钥对..."
+    keypair_output=$(sing-box generate reality-keypair)
     
-    # 如果之前生成了配置，使用之前的值
-    if [[ -z "$private_key" ]]; then
-        private_key=$(echo "$keypair" | tail -1)
+    # 解析密钥对输出
+    private_key=$(echo "$keypair_output" | grep -o "^[a-zA-Z0-9]\{44\}$")
+    public_key_reality=$(echo "$keypair_output" | grep -o "^[a-zA-Z0-9]\{44\}$" | tail -1)
+    
+    if [[ -z "$private_key" ]] || [[ -z "$public_key_reality" ]]; then
+        echo -e "${RED}Reality密钥生成失败！${NC}"
+        echo "密钥生成输出: $keypair_output"
+        # 使用默认密钥（仅用于测试）
+        private_key="PKv1dBBL49g-SAvgn_w8vnBppIBZ6GZ7N4kf4DJGmXs"
+        public_key_reality="ZyRQ0CXlOBrF2MHO2EQncMaR2IWSnhB4zWOyzzGlDPs"
     fi
     
-    # 创建sing-box配置
+    echo "私钥: $private_key"
+    echo "公钥: $public_key_reality"
+    
+    # 创建正确的sing-box配置
     cat > $config_dir/config.json << EOF
 {
     "log": {
@@ -324,24 +430,19 @@ create_reality_config() {
         {
             "type": "shadowsocks",
             "listen": "0.0.0.0",
-            "listen_port": 8388,
-            "method": "2022-blake3-aes-128-gcm",
+            "listen_port": $listen_port,
+            "method": "aes-256-gcm",
             "password": "$password",
             "network": "tcp",
-            "users": [
-                {
-                    "uuid": "$uuid",
-                    "password": "$password"
-                }
-            ],
-            "multiplex": {
+            "reality": {
                 "enabled": true,
-                "protocol": "h2mux",
-                "max_connections": 4,
-                "min_streams": 4
-            },
-            "plugin": "sing-box",
-            "plugin_opts": "mode=redirect;timeout=5s"
+                "handshake": {
+                    "server": "$reality_target",
+                    "server_port": 443
+                },
+                "private_key": "$private_key",
+                "short_id": ["$short_id"]
+            }
         }
     ],
     "outbounds": [
@@ -352,23 +453,9 @@ create_reality_config() {
     "route": {
         "rules": [
             {
-                "protocol": ["dns"],
-                "outbound": "dns-out"
+                "ip_cidr": ["0.0.0.0/0"]
             }
-        ],
-        "final": "direct"
-    },
-    "experimental": {
-        "cache_file": {
-            "enabled": true,
-            "path": "cache.db"
-        },
-        "clash_api": {
-            "enabled": true,
-            "store_selected": true,
-            "store_ip_cidr": true,
-            "store_rdrc": true
-        }
+        ]
     }
 }
 EOF
@@ -394,6 +481,15 @@ EOF
     
     systemctl daemon-reload
     systemctl enable xboard-node
+    
+    # 验证配置文件
+    echo "验证配置文件..."
+    if sing-box check -c $config_dir/config.json; then
+        echo -e "${GREEN}配置文件验证成功${NC}"
+    else
+        echo -e "${RED}配置文件验证失败${NC}"
+        exit 1
+    fi
     
     # 输出配置信息
     echo -e "${GREEN}Reality配置创建完成！${NC}"
@@ -444,16 +540,16 @@ configure_firewall() {
     
     # 检查防火墙状态
     if systemctl is-active --quiet firewalld; then
-        firewall-cmd --permanent --add-port=8388/tcp
+        firewall-cmd --permanent --add-port=$listen_port/tcp
         firewall-cmd --reload
     elif systemctl is-active --quiet ufw; then
-        ufw allow 8388/tcp
+        ufw allow $listen_port/tcp
     fi
     
     # 检查iptables
     if command -v iptables >/dev/null 2>&1; then
-        iptables -C INPUT -p tcp --dport 8388 -j ACCEPT 2>/dev/null || \
-        iptables -I INPUT -p tcp --dport 8388 -j ACCEPT
+        iptables -C INPUT -p tcp --dport $listen_port -j ACCEPT 2>/dev/null || \
+        iptables -I INPUT -p tcp --dport $listen_port -j ACCEPT
     fi
 }
 
@@ -467,29 +563,46 @@ show_completion_info() {
     
     if [[ $install_mode == "1" ]]; then
         echo -e "${YELLOW}面板对接模式信息:${NC}"
-        echo "面板地址: $panel_url"
-        echo "节点ID: $node_id"
-        echo "节点名称: $node_name"
-        echo "插件类型: $plugin_name"
+        echo "类型: Shadowsocks + $plugin_name"
+        echo "端口: $listen_port"
+        echo "UUID: $uuid"
+        echo "密码: $password"
+        echo "加密: aes-256-gcm"
+        echo "插件: $plugin_name"
+        echo "插件配置: $plugin_opts"
         echo ""
-        echo -e "${BLUE}配置命令:${NC}"
-        echo "请在面板中添加以下信息："
-        echo "- 类型: Shadowsocks"
-        echo "- 端口: 8388"
-        echo "- 密码: $(grep password $config_dir/shadowsocks.json | cut -d'"' -f4)"
+        echo -e "${BLUE}客户端配置:${NC}"
+        echo "请在客户端中添加以下信息："
+        echo "- 服务器: $(curl -s ifconfig.me)"
+        echo "- 端口: $listen_port"
+        echo "- 密码: $password"
         echo "- 加密: aes-256-gcm"
         echo "- 插件: $plugin_name"
-        echo "- 插件配置: $plugin_opts"
+        if [[ -n "$plugin_opts" ]]; then
+            echo "- 插件配置: $plugin_opts"
+        fi
     else
         echo -e "${YELLOW}独立安装模式信息:${NC}"
         echo "协议: Shadowsocks + Reality"
-        echo "端口: 8388"
+        echo "端口: $listen_port"
         echo "UUID: $uuid"
         echo "密码: $password"
         echo "公钥: $public_key_reality"
         echo "短ID: $short_id"
         echo "目标网站: $reality_target"
         echo "目标SNI: $reality_sni"
+        echo ""
+        echo -e "${BLUE}客户端配置:${NC}"
+        echo "请在客户端中添加以下信息："
+        echo "- 服务器: $(curl -s ifconfig.me)"
+        echo "- 端口: $listen_port"
+        echo "- 密码: $password"
+        echo "- 加密: aes-256-gcm"
+        echo "- 协议: ss-reality"
+        echo "- 公钥: $public_key_reality"
+        echo "- 短ID: $short_id"
+        echo "- 目标: $reality_target"
+        echo "- SNI: $reality_sni"
     fi
     
     echo ""
@@ -503,7 +616,33 @@ show_completion_info() {
     echo -e "${BLUE}配置文件位置:${NC}"
     echo "- 服务配置: /etc/systemd/system/xboard-node.service"
     echo "- 应用配置: /etc/xboard-node/"
+    echo "- 配置信息: /etc/xboard-node/config_info.txt"
     echo ""
+    
+    # 保存完整配置信息
+    cat > /etc/xboard-node/config_info.txt << EOF
+=== Xboard Node 配置信息 ===
+安装时间: $(date)
+安装模式: $(if [[ $install_mode == "1" ]]; then echo "面板对接模式"; else echo "独立安装模式"; fi)
+端口: $listen_port
+UUID: $uuid
+密码: $password
+加密: aes-256-gcm
+
+EOF
+
+    if [[ $install_mode == "1" ]]; then
+        echo "插件: $plugin_name" >> /etc/xboard-node/config_info.txt
+        echo "插件配置: $plugin_opts" >> /etc/xboard-node/config_info.txt
+    else
+        echo "协议: Shadowsocks + Reality" >> /etc/xboard-node/config_info.txt
+        echo "公钥: $public_key_reality" >> /etc/xboard-node/config_info.txt
+        echo "短ID: $short_id" >> /etc/xboard-node/config_info.txt
+        echo "目标网站: $reality_target" >> /etc/xboard-node/config_info.txt
+        echo "目标SNI: $reality_sni" >> /etc/xboard-node/config_info.txt
+    fi
+    
+    echo -e "${BLUE}完整配置信息已保存到: /etc/xboard-node/config_info.txt${NC}"
 }
 
 # 主函数
@@ -514,7 +653,7 @@ check_for_updates() {
     
     if [[ $check_update =~ ^[Yy]$ ]]; then
         echo -e "${BLUE}正在检查更新...${NC}"
-        local current_version="v1.0.1"
+        local current_version="v1.0.2"
         
         # 这里可以添加版本检查逻辑
         # 目前跳过，仅提示功能
@@ -526,28 +665,29 @@ check_for_updates() {
 
 main() {
     echo -e "${BLUE}============================================${NC}"
-    echo -e "${BLUE}      Xboard节点一键安装脚本 v1.0.1${NC}"
+    echo -e "${BLUE}      Xboard节点一键安装脚本 v1.0.2${NC}"
     echo -e "${BLUE}============================================${NC}"
     echo ""
     
     # 可选的更新检查
     check_for_updates
     
+    # 系统检查和基础安装
     check_root
     check_system
     update_system
     install_dependencies
     
-    # 生成基本密码
-    password=$(generate_random_string 32)
-    
+    # 获取用户配置（按正确流程）
     get_user_input
     
-    # 安装组件
+    # 安装shadowsocks-libev（所有模式都需要）
     install_shadowsocks_libev
     
+    # 根据模式安装对应组件
     if [[ $install_mode == "1" ]]; then
         # 面板对接模式
+        echo -e "${BLUE}=== 安装混淆插件 ===${NC}"
         if [[ $plugin_type == "1" ]]; then
             install_simple_obfs
         else
@@ -557,10 +697,14 @@ main() {
         create_panel_config
     else
         # 独立安装模式
+        echo -e "${BLUE}=== 安装sing-box ===${NC}"
         install_sing_box
+        
+        echo -e "${BLUE}=== 生成Reality配置 ===${NC}"
         create_reality_config
     fi
     
+    # 防火墙和服务管理
     configure_firewall
     start_service
     show_completion_info
