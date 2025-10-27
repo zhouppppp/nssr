@@ -24,10 +24,10 @@
 
 ```bash
 # 下载并执行安装脚本
-curl -fsSL https://raw.githubusercontent.com/你的用户名/nssr/main/nssr.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zhouppppp/nssr/main/nssr.sh | bash
 
 # 或者使用wget
-wget -qO- https://raw.githubusercontent.com/你的用户名/nssr/main/nssr.sh | bash
+wget -qO- https://raw.githubusercontent.com/zhouppppp/nssr/main/nssr.sh | bash
 ```
 
 ### 备用安装方式
